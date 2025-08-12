@@ -1,0 +1,107 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'IMAGE_TYPE', choices: ['frontend', 'backend', 'both'], description: 'Which image(s) to update')
+        string(name: 'FRONTEND_TAG', defaultValue: 'latest', description: 'Frontend Docker image tag', trim: true)
+        string(name: 'BACKEND_TAG', defaultValue: 'latest', description: 'Backend Docker image tag', trim: true)
+        string(name: 'TERRAFORM_TEMPLATE_VERSION', defaultValue: 'v1.0', description: 'Version name for the Terraform code must be different', trim: true)
+    }
+    environment {
+        AWS_REGION = credentials('AWS_REGION')
+        AWS_ACCESS_KEY_ID = credentials('AWS_ACCESS_KEY_ID')
+        AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
+        TF_WORKING_DIR = 'terraform'
+    }
+    tools {
+        terraform 'terraform'
+    }
+
+    stages {
+        stage('Clone Repo') {
+            steps {
+                git branch: 'main', url: 'https://github.com/santoshpalla27/ec2-setup-test-for-deployment.git'
+            }
+        }
+
+        stage('Update Image Tags') {
+            steps {
+                script {
+                    if (params.IMAGE_TYPE == 'frontend' || params.IMAGE_TYPE == 'both') {
+                        sh """
+                            echo "Updating Frontend Image Tag..."
+                            sed -i 's#santoshpalla27/stqs:frontend-[^[:space:]]*#santoshpalla27/stqs:frontend-${params.FRONTEND_TAG}#g' ansible/setup.yml
+                        """
+                    }
+
+                    if (params.IMAGE_TYPE == 'backend' || params.IMAGE_TYPE == 'both') {
+                        sh """
+                            echo "Updating Backend Image Tag..."
+                            sed -i 's#santoshpalla27/stqs:backend-[^[:space:]]*#santoshpalla27/stqs:backend-${params.BACKEND_TAG}#g' ansible/setup.yml
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Update terraform code') {
+            steps {
+                script {
+                    sh """
+                        echo "Updating Terraform Code Version..."
+                        sed -i 's#name_prefix   = "main-template-[^[:space:]]*"#name_prefix   = "main-template-${params.TERRAFORM_TEMPLATE_VERSION}"#g' terraform/main.tf
+                    """
+                }
+            }
+        }
+
+        stage('Commit Changes') {
+            environment {
+                GITHUB_USERNAME = "santoshpalla27"
+                GITHUB_EMAIL = "santoshpalla2002@gmail.com"
+                GITHUB_REPO = "ec2-setup-test-for-deployment"
+            }
+            steps {
+                script {
+                    sh '''
+                        git config user.email "${GITHUB_EMAIL}"
+                        git config user.name "${GITHUB_USERNAME}"
+                        git add .
+                        git commit -m "Updated Docker images versions and the template version ${BUILD_NUMBER}" || echo "No changes to commit"
+                        git push https://${GITHUB_TOKEN}@github.com/${GITHUB_USERNAME}/${GITHUB_REPO}.git HEAD:main
+                    '''
+                }
+            }
+        }
+        stage('Setup AWS Credentials') {
+            steps{
+                sh '''
+                aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                aws configure set region $AWS_REGION
+                
+                # Verify configuration
+                aws sts get-caller-identity
+                '''
+            }
+        }
+
+        stage('terraform apply') {
+            steps {
+                dir('terraform') {
+                    script {
+                        sh "terraform apply --auto-approve"
+                    }
+                }
+            }
+        }
+
+        stage('rolling update') {
+            steps {
+                script {
+                    sh "aws autoscaling start-instance-refresh --auto-scaling-group-name main-sg"
+                }
+            }
+        }
+    }
+}

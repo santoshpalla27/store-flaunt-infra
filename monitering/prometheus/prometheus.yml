@@ -1,0 +1,69 @@
+global:
+  scrape_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - "container_rules.yml"
+  - "alert_rules.yml"
+
+scrape_configs:
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  - job_name: 'node-exporter-local'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'cadvisor-local'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'node-exporter-ec2'
+    ec2_sd_configs:
+      - region: ap-south-1
+        port: 9100
+        filters:
+          - name: "tag:Name"
+            values: ["MainInstance"]
+    relabel_configs:
+      - source_labels: [__meta_ec2_public_ip]
+        target_label: __address__
+        replacement: "$1:9100"
+
+  - job_name: 'cadvisor-ec2'
+    ec2_sd_configs:
+      - region: ap-south-1
+        port: 8080
+        filters:
+          - name: "tag:Name"
+            values: ["MainInstance"]
+    relabel_configs:
+      - source_labels: [__meta_ec2_public_ip]
+        target_label: __address__
+        replacement: "$1:8080"
+
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://example.com
+          - https://qhr.qurinomsolutions.com/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: 'docker-exporter'
+    static_configs:
+      - targets: ['docker-exporter:9487']

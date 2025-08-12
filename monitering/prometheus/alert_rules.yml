@@ -1,0 +1,137 @@
+groups:
+  - name: ec2_container_debug_alerts
+    interval: 30s
+    rules:
+      - alert: Debug_ContainerHighCPUUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total{name!="", instance=~".*"}[1m]) * 100 > 0.05
+        for: 30s
+        labels:
+          severity: info
+        annotations:
+          summary: "🔧 Debug: CPU > 0.05% on {{ $labels.name }} @ {{ $labels.instance }}"
+          description: "Container {{ $labels.name }} is using >0.05% CPU"
+
+      - alert: Debug_NodeHighCPUUsageTest
+        expr: |
+          (
+            sum by(instance) (rate(container_cpu_usage_seconds_total{instance=~".*"}[1m]))
+            /
+            on(instance) group_left
+            machine_cpu_cores
+          ) * 100 > 0.1
+        for: 10s
+        labels:
+          severity: info
+        annotations:
+          summary: "🧪 Test: Node CPU > 0.1% @ {{ $labels.instance }}"
+          description: "This is a test alert: Node {{ $labels.instance }} CPU usage exceeds 0.1%"
+
+      - alert: Debug_ExitedContainers
+        expr: |
+          max_over_time(container_last_seen{name!="", instance=~".*"}[15m])
+          unless
+          container_memory_usage_bytes{name!=""}
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "🔧 Debug: Exited containers detected @ {{ $labels.instance }}"
+          description: "Some containers may have exited within the last 15 minutes."
+
+      - alert: Debug_ZeroRunningContainers
+        expr: |
+          count(
+            container_memory_usage_bytes{name!="", instance=~".*"}
+            and on(container)
+            (time() - container_last_seen < 10)
+          ) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "❗ Debug: No running containers @ {{ $labels.instance }}"
+          description: "No containers are actively running on this instance."
+
+      - alert: Debug_NodeHighMemoryUsage
+        expr: |
+          (
+            (node_memory_MemTotal_bytes{instance=~".*"} - node_memory_MemAvailable_bytes{instance=~".*"})
+            /
+            node_memory_MemTotal_bytes{instance=~".*"}
+          ) * 100 > 5
+        for: 30s
+        labels:
+          severity: info
+        annotations:
+          summary: "🔧 Debug: Node RAM > 5% @ {{ $labels.instance }}"
+          description: "Node at {{ $labels.instance }} is using more than 5% of total RAM."
+
+
+      - alert: Debug_ContainerMemoryUsage
+        expr: |
+          container_memory_usage_bytes{name!="", instance=~".*"} / (1024 * 1024) > 5
+        for: 30s
+        labels:
+          severity: info
+        annotations:
+          summary: "🔧 Debug: Memory > 5MB in container {{ $labels.name }} @ {{ $labels.instance }}"
+          description: "Container {{ $labels.name }} using >5MB memory."
+
+
+#                      Node Alerts
+
+      - alert: NodeHighCPUUtilization
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "🚨 High CPU Usage on {{ $labels.instance }}"
+          description: "CPU utilization is above 80% for more than 1 minute on {{ $labels.instance }}."
+
+
+      - alert: NodeHighMemoryUsage
+        expr: |
+          ((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 8
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "🚨 High RAM Usage on {{ $labels.instance }}"
+          description: "RAM usage is above 80% on {{ $labels.instance }}."
+
+
+      - alert: NodeDiskUsageHighAllMounts
+        expr: |
+          sum by(instance) (
+            node_filesystem_size_bytes{fstype!~"tmpfs|aufs|overlay"} - 
+            node_filesystem_avail_bytes{fstype!~"tmpfs|aufs|overlay"}
+          )
+          /
+          sum by(instance) (
+            node_filesystem_size_bytes{fstype!~"tmpfs|aufs|overlay"}
+          ) * 100 > 80
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "🚨 High Disk Usage on {{ $labels.instance }}"
+          description: "Disk usage has exceeded 80% across all real volumes on {{ $labels.instance }}."
+
+
+
+
+
+      - alert: WebsiteDown
+        expr: probe_success == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 Website down: {{ $labels.instance }}"
+          description: |
+            Probe to {{ $labels.instance }} has failed.
+            The domain is unreachable or returned an unexpected status.
+            Please investigate the issue.

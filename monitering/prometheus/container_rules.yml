@@ -1,0 +1,7 @@
+groups:
+  - name: container_rules
+    interval: 30s
+    rules:
+      - record: container_recently_running
+        expr: |
+          count(container_memory_usage_bytes{image!=""}) by (instance)
